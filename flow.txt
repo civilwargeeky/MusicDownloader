@@ -1,0 +1,36 @@
+Pre-Initialization:
+  Get file to open for input
+
+Initialization:
+  Open file, validate forms and options
+    Idea for a "download object" members
+      folder name
+      playlist url
+      list of regex expressions
+        so like ("\(Minecraft Original\)", "") would remove that text when a song title goes through parser.
+  ==Thread1: Update youtube-dl
+  Make array of songs per playlist
+  Fill out arrays of songs. Either from youtube API(preferred) or through parsing the playlist page.
+    A song would also get the song name (parsed) to pass to youtube dl later.
+  Generate necessary output folders. (Also temp folders?)
+  ==Thread1: Wait for finish
+  
+Main Process:
+  ==Threaded: Start a thread for each "download object" which is a playlist.
+    Thread will check if parsed name matches a song in output folder, skipping if already exist
+    Every time a download is finished, function triggers data event that triggers update of display
+      On update, updates each playlist's "data" attribute with most recent data
+    If there is a temp folder, thread will copy from temp folder to output folder, delete temp
+  Display has a running timer, and readouts of percentage each playlist has finished
+  Ex:
+    Time Elapsed: 1:35
+    Main Songs:  17 /  42 30%
+    Dubstep   :   7 /  10 70%
+    Whatever  : 100 / 150 67%
+    Several   : ==COPYING!===
+    Another   : ====DONE!====
+  End loop when all threads are dead
+  
+Post Process:
+  Display list of updated songs?
+  Check for connected android device and place changed songs in there
