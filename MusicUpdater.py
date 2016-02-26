@@ -23,14 +23,22 @@ UPDATE_SPEED = 5 #Seconds between updating "time elapsed" when no events fired
 DEBUG = False
 
 
-import json, os, re, subprocess, sys, threading, time
+import json, os, os.path, re, subprocess, sys, threading, time
+from mutagen.id3 import ID3, ID3NoHeaderError
+from mutagen.easyid3 import EasyID3
+from mutagen import File as MutagenFile #Common name for var
+import tkinter as tk
+from tkinter import ttk
 
 ####DEFINITIONS####
 def debug(*arg, **kwarg):
   if DEBUG:
     if len(arg) == 1 and arg[0] == "pause": return input("Waiting...")
     if not "sep" in kwarg: kwarg["sep"] = ""
-    return print(*arg, **kwarg)
+    try:
+      return print(*arg, **kwarg)
+    except UnicodeEncodeError: #Stupid music notes
+      return print("Could not print unsupported chars", **kwarg)
 
 class Data:
   Event = None
@@ -55,27 +63,40 @@ class Song:
   def parseTitle(self, inputRegex, outputRegex):
     if self.explicit: return False #Don't do anything 
     self.name = re.sub(inputRegex, outputRegex, self.name, flags = re.I) #Do sub, ignoring case
+    
+  def getFileExtension(self):
+    return ".mp3"
+    
+  #Function to get the current fileName of a downloaded song
+  def getFileName(self):
+    return self.name+self.getFileExtension()
 
 class Playlist:
   regexList = [] #This is a global list
+  shouldGenerateTags = True #Config option
+  allSongsDefaultArtist = False #You can set this
+  defaultArtist = "DJ Dan" #Tee hee
 
   def __init__(self, folderName):
     self.folder = folderName
     self.initialized = False #When Playlist contains songs, will be true
     self.songList = []
     self.regexList = [] #List of regex tuples in form of (input, output,)
+    self.data = Data() #Interface for threading later. Outside of scope of main class
     
     
   def __repr__(self): #Why not
     return "<Playlist object, name="+repr(self.getFolder())+", init="+repr(self.initialized)+">"
     
   #Just officiating that can add URL if not initializing with songs
+  #Returns self because I'm lazy
   def setURL(self, url):
     self.url = url
+    return self
     
   #Returns the folder name. May at some point return a cleansed and parsed name
   def getFolder(self):
-    return self.folder
+    return self.folder or ""
     
   #Pre : Expects song to be either a list of Songs or a Song.
   #Post: the playlist's songList parameter is set
@@ -88,6 +109,10 @@ class Playlist:
       self.initialized = True
     else:
       raise TypeError("addSong expects a Song or list of Songs, got: ", str(type(song)))
+    
+  #Returns the path of the requested song with respect to the current working directory
+  def getSongPath(self, song):
+    return os.path.join(os.path.normpath((OUTPUT_FOLDER+"/"+self.getFolder()) if self.getFolder() else OUTPUT_FOLDER), song.getFileName())
       
   #Pre: playlistUrl should be a valid HTTP url.
   #Post: If url is valid and service working, returns a list of Songs.
@@ -106,13 +131,59 @@ class Playlist:
     for song in playlistData["entries"]:
       if song["_type"] == "url":
         self.addSong(Song(song["url"], song["title"]))
+        
+  #This downloads the song to the proper folder, supressing output
+  #Pre : An initialized song and non-blank folder for self
+  #Post: The requested song should be downloaded into the current playlist's path as an .mp3
+  def downloadSong(self, song):
+    outputFolder = (OUTPUT_FOLDER+"/"+self.getFolder()) if self.getFolder() else OUTPUT_FOLDER #If no folder name, set to base directory
+    subprocess.call("youtube-dl.exe -o \""+outputFolder+"/"+(song.name or "[ERROR]")+".%(ext)s\" -x --audio-format mp3 --audio-quality 0 -- "+song.url, shell = True, stdout = subprocess.DEVNULL)
     
+  #This will do the tag setting and stuff on various songs
+  #Pre : song is a valid song that has already been downloaded
+  #Post: The song will have tags readable by mp3 readers
+  def postProcessSong(self, song):
+    if self.shouldGenerateTags:
+      try:
+        name = self.getSongPath(song)
+        localList = song.name.split("- ") #The song should be split as "artist - title". If not, it won't be recognized
+        artist = localList[0] if len(localList) > 1 else self.defaultArtist #The artist is usually first if its there. Otherwise no artist
+        if self.allSongsDefaultArtist: artist = self.defaultArtist
+        title = localList[1] if len(localList) > 1 else localList[0] #If there is no artist, the whole name is the title
+        
+        artist = artist.lstrip().rstrip()
+        title  =  title.lstrip().rstrip()
+        
+        #Appreciate this. It took upwards of 5 hours to get the damn software to do this.
+        try:
+          songID = EasyID3(name)
+        except ID3NoHeaderError:
+          songID = MutagenFile(name, easy = True)
+          songID.add_tags()
+        songID['artist'] = artist
+        songID['title'] = title
+        songID.save()
+        songID = ID3(name, v2_version=3) #EasyID3 doesn't support saving as 2.3 to get Windows to recognize it
+        songID.update_to_v23()
+        songID.save(v2_version=3)
+      except FileNotFoundError:
+        debug("File not found for: ", name)
+        
   #Pre : songList is not empty
   #Post: all songs have had their parseTitle methods called on all regex rules
   def parseAllSongs(self):
     for song in self.songList:
       for regex in self.regexList + type(self).regexList : #Adds in global regex and playlist
         song.parseTitle(regex[0], regex[1])
+      #Go through all characters and eliminate non-printable characters
+      i = 0
+      while i < len(song.name): #Because loop limits
+        try:
+          song.name[i].encode("ascii")
+        except UnicodeEncodeError:
+          song.name = song.name[:i] + song.name[i+1:] #Take out the offending character
+        i += 1
+      song.name = song.name.lstrip().rstrip() #Get rid of pesky trailing whitespace
     
   #Pre : Expects an input regex and an output regex
   #Post: Adds the selected regex to the Playlist's regex filter
@@ -181,7 +252,6 @@ def parseInputFile(fileName):
     elif not currPlaylist and not inRegex:
       debug("New Playlist!")
       currPlaylist = Playlist(currLine)
-      currPlaylist.data = Data() #Interface for threading later. Outside of scope of main class
       toRet[currLine] = currPlaylist
       inRegex = False
     else:
@@ -194,7 +264,10 @@ def parseInputFile(fileName):
           currPlaylist.addRegex(*toSend)
         else: #We can add things at the top!
           Playlist.addRegexGlobal(*toSend)
-      elif "playlist" in currLine:
+      elif currLine.lower()[:14] == "default artist": #We only use the default artist
+        debug("Setting to default artist!")
+        currPlaylist.allSongsDefaultArtist = True
+      elif "playlist" in currLine: #The youtube url has "playlist?list=..."
         debug("Adding playlist!")
         currPlaylist.setURL(currLine)
       else: #If adding directly by song
@@ -207,11 +280,6 @@ def parseInputFile(fileName):
           Song(lineParts[0], lineParts[1] if nameGiven else "", explicit = not nameGiven))
         
   file.close()
-  """
-  #TEMPORARY
-  for i in list(toRet.keys()): #Because I'm not dealing with getting stuff from playlist yet
-    if not toRet[i].initialized:
-      del toRet[i] """
       
   return toRet
   
@@ -227,12 +295,13 @@ def Thread_downloadPlaylist(playlist, blocker):
   blocker.acquire() #Wait to connect
   playlist.data.status = None #Signal download has started
   for song in playlist.songList:
-    try:
-      debug("New song! \n",song.name,"\n",song.originalName)
-    except:
-      print("Could not display song info")
-    #This downloads the song to the proper folder, supressing output
-    subprocess.call("youtube-dl.exe -o \""+OUTPUT_FOLDER+"/"+playlist.getFolder()+"/"+(song.name or "[ERROR]")+".%(ext)s\" -x --audio-format mp3 --audio-quality 0 -- "+song.url, shell = True, stdout = subprocess.DEVNULL)
+    debug("New song! \n",song.name,"\n",song.originalName)
+      
+    #Download the song
+    playlist.downloadSong(song)
+    #When that's done, add mp3 data if requested
+    playlist.postProcessSong(song)
+
     #Update biometrics
     playlist.data.currSongs += 1
     playlist.data.Event.set() #Signal to update watcher
@@ -250,15 +319,53 @@ def main():
     if os.path.exists(sys.argv[1]):
       inputFile = sys.argv[1]
     else: raise FileNotFoundError("invalid source file")
-  if not inputFile: inputFile = input("What file to use for input? ")
+  if not inputFile: 
+    root = tk.Tk()
+    root.minsize(width = 400, height = 200)
+    ttk.Label(text = "Put file or playlist url here").pack()
+    v_file = tk.StringVar(root, "")
+    b_file = ttk.Entry(textvariable=v_file, width = 75)
+    b_file.pack()
+    def paste():
+      try:
+        v_file.set(root.clipboard_get())
+      except:
+        pass
+    tk.Button(text = "Paste from clipboard", command = paste).pack()
+    
+    def quit(): root.destroy()
+    tk.Button(text = "Start Downloading!", command = quit).pack()
+    
+    root.mainloop()
+    
+    inputFile = v_file.get()
+    
+    #inputFile = input("What file to use for input (or playlist url)? ")
   
   ####INITIALIZATION####
-  #Getting input file
-  try:
-    mainList = parseInputFile(inputFile)
-  except FileNotFoundError:
-    print("input file \""+inputFile+"\" not found. Terminating")
-    return 1; #Exit with error
+  if "youtube.com/playlist" in inputFile:
+    #Get an input playlist
+    debug("Using raw playlist input")
+    mainList = {"Main Playlist": Playlist("Main Playlist").setURL(inputFile)}
+  else:
+    #Getting input file
+    debug("Getting input from file")
+    try:
+      mainList = parseInputFile(inputFile)
+    except FileNotFoundError:
+      print("input file \""+inputFile+"\" not found. Terminating")
+      root = tk.Tk()
+      root.minsize(height = 200, width = 200)
+      ttk.Label(text = "File not found: "+(inputFile or "(blank file)")).pack()
+      root.mainloop()
+      return 1; #Exit with error
+    
+  if len(mainList) == 0:
+    if DEBUG:
+      raise(ValueError("No input lists in input file"))
+    else:
+      print("There were no playlists in your input file!")
+      return 1;
     
   #Update youtube-dl in a thread
   updateThread = threading.Thread(target = os.system, args = ("start /WAIT youtube-dl -U",))
