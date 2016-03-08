@@ -7,20 +7,23 @@ Possible expansion ideas:
   Download file list from URL (maybe from a pastebin)
   Help section
   GUI to monitor
-  Maybe have something to parse song names and get mp3 titles and artists
-    http://id3-py.sourceforge.net/
-    https://wiki.python.org/moin/PythonInMusic
-  Be able to specify output folder from input file
-  "Freeze" this with CX-Freeze?
-  Make an installer (see that thing from last semester)
+  GUI to specify output (possibly have conifg file for program)
+    With this, see if anything uses that windows GUI thing off the bat.
   A "LocalPlaylist" class that inherits from Playlist and ignores urls and such, so that you can use this program to parse lists of song names
+  
+  Restructure threading!
+  mainProgram
+    watcher thread - holds the blocker, and only creates new threads when free, so all playlists don't make a new thread immediately
+    --Second blocker for songs. Each playlist tries to download as many songs as possibly in threads. Each song will get its own thread.
+    --This way, if there's only 1 playlist, that playlist can take all 5 download threads at once.
+    
 """
 ####CONFIG####
+INPUT_FOLDER  = "Scripts"
 OUTPUT_FOLDER = "Music"
 #OUTPUT_FOLDER = "Q:\\Coding\\Workspace\\MusicFolder" #"Output"
 MAX_SIMULTANEOUS_DOWNLOADS = 5
 UPDATE_SPEED = 5 #Seconds between updating "time elapsed" when no events fired
-DEBUG = False
 
 
 import json, os, os.path, re, subprocess, sys, threading, time
@@ -29,6 +32,12 @@ from mutagen.easyid3 import EasyID3
 from mutagen import File as MutagenFile #Common name for var
 import tkinter as tk
 from tkinter import ttk
+
+#My Libs
+import MusicDisplay as Disp
+
+DEBUG = os.path.split(os.getcwd())[1] == "MusicDownloader"
+YOUTUBE_STRING = "youtube.com/playlist" #Used to determine if a file is a youtube playlist
 
 ####DEFINITIONS####
 def debug(*arg, **kwarg):
@@ -39,6 +48,19 @@ def debug(*arg, **kwarg):
       return print(*arg, **kwarg)
     except UnicodeEncodeError: #Stupid music notes
       return print("Could not print unsupported chars", **kwarg)
+      
+def firstTimeInstructions():
+  FILE = "hasRunOnce"
+  if not os.path.exists(FILE):
+    Disp.MessageBox("""
+    First Time Instructions!
+    1. There will be multiple command prompt windows opening. DO NOT CLOSE ANY OF THEM.
+    2. After a bit there will only be one. This one displays the current status of the downloads.
+    3. When all the music has been downloaded, the window will close. There should be a "Music Folder" shortcut on your desktop to access your music.
+    4. Your downloads will begin when you close this window
+    5. Enjoy! 
+    """, "Instructions")
+    open(FILE, "w").close() #Empty file :D
 
 class Data:
   Event = None
@@ -313,37 +335,72 @@ def Thread_downloadPlaylist(playlist, blocker):
   
 def main():
   ####PRE-INIT####
-  #Getting input file to parse
+  #Getting input
   inputFile = None
   if len(sys.argv) > 1:
     if os.path.exists(sys.argv[1]):
       inputFile = sys.argv[1]
     else: raise FileNotFoundError("invalid source file")
   if not inputFile: 
-    root = tk.Tk()
-    root.minsize(width = 400, height = 200)
-    ttk.Label(text = "Put file or playlist url here").pack()
-    v_file = tk.StringVar(root, "")
-    b_file = ttk.Entry(textvariable=v_file, width = 75)
-    b_file.pack()
-    def paste():
-      try:
-        v_file.set(root.clipboard_get())
-      except:
-        pass
-    tk.Button(text = "Paste from clipboard", command = paste).pack()
+    def adjustInputFile(input):
+      return os.path.join(INPUT_FOLDER, input) if (input and not os.path.isabs(input)) else input
     
-    def quit(): root.destroy()
+    #Getting values for display
+    v_options = []
+    for a in os.walk(INPUT_FOLDER):
+      for b in a[2]:
+        v_options.append(os.path.join(a[0],b)[len(INPUT_FOLDER)+1:]) #Get rid of folder name
+        
+    root = Disp.MainBox("Music Updater")
+    root.minsize(width = 400, height = 200)
+    Disp.VarLabel("Choose a file from the list!")
+    choiceBox = Disp.VarList(v_options, width = 75)
+    def openFile(*args):
+      if choiceBox.get():
+        debug('"'+adjustInputFile(choiceBox.get())+'"')
+        os.system('"'+adjustInputFile(choiceBox.get())+'"') #Just call it and they can open it with whatever
+    
+    tk.Button(text = "Open file for editing", command = openFile).pack()
+    Disp.VarLabel("Or you can put a file or playlist url here")
+    choiceEntry = Disp.VarEntry(width = 75)
+    
+    #Functions
+    def quit(*args):
+      root.destroy()
+      
+    def paste(*args):
+      try:
+        choiceEntry.set(root.clipboard_get())
+      except:
+        pass #I don't care if there's nothing there
+      
+    choiceBox.bind("<Double-Button-1>", quit)
+    tk.Button(text = "Paste from clipboard", command = paste).pack()
     tk.Button(text = "Start Downloading!", command = quit).pack()
     
-    root.mainloop()
+    root.shouldStopProgram = False
+    def stopProgram(): #If they press the x button
+      debug("STOPPING!")
+      root.shouldStopProgram = True
+      root.destroy()
+    root.protocol("WM_DELETE_WINDOW", stopProgram)
     
-    inputFile = v_file.get()
+    root.mainloop() #Run all the things!
     
-    #inputFile = input("What file to use for input (or playlist url)? ")
+    if root.shouldStopProgram:
+      debug("Exit button pressed!")
+      return 0; #Successful code completion
+    
+    debug("entry: ",choiceEntry.get())
+    debug("box:   ", choiceBox.get())
+    inputFile = (choiceEntry.get() if choiceEntry.get() else (choiceBox.get() or "")) #Can be None if neither
+    #Makes the proper file name
+    if not YOUTUBE_STRING in inputFile: inputFile = adjustInputFile(inputFile)
+    #if inputFile and not os.path.isabs(inputFile) and not YOUTUBE_STRING in inputFile: inputFile = os.path.join(INPUT_FOLDER, inputFile)
+    debug("Resulting path: ", inputFile)
   
   ####INITIALIZATION####
-  if "youtube.com/playlist" in inputFile:
+  if YOUTUBE_STRING in inputFile:
     #Get an input playlist
     debug("Using raw playlist input")
     mainList = {"Main Playlist": Playlist("Main Playlist").setURL(inputFile)}
@@ -352,34 +409,42 @@ def main():
     debug("Getting input from file")
     try:
       mainList = parseInputFile(inputFile)
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
       print("input file \""+inputFile+"\" not found. Terminating")
-      root = tk.Tk()
-      root.minsize(height = 200, width = 200)
-      ttk.Label(text = "File not found: "+(inputFile or "(blank file)")).pack()
-      root.mainloop()
+      Disp.MessageBox("File not found: "+(inputFile or "(blank file)"), "ERROR!")
       return 1; #Exit with error
     
   if len(mainList) == 0:
     if DEBUG:
       raise(ValueError("No input lists in input file"))
     else:
-      print("There were no playlists in your input file!")
+      Disp.MessageBox("There were no playlists in your input file!", "ERROR!")
       return 1;
     
   #Update youtube-dl in a thread
-  updateThread = threading.Thread(target = os.system, args = ("start /WAIT youtube-dl -U",))
+  updateThread = threading.Thread(target = os.system, args = ("start /WAIT youtube-dl.exe -U",))
   updateThread.start()
+  
+  #After we do that, print first time use instructinos (if necessesary)
+  firstTimeInstructions()
   
   print("Generating playlist songs and folders")
   for playlist in mainList.values():
     #Generate song lists from internet sources
     if not playlist.initialized:
-      playlist.generateSongList()
+      try:
+        playlist.generateSongList()
+      except ValueError:
+        Disp.MessageBox("Could not download playlist: "+playlist.url+"\nThe playlist either does not exist, or is not public.\nTry making your playlist public :)", "ERROR!")
+        return 1
     playlist.parseAllSongs()
     #Make folder if not existing
     if not os.path.exists(path(playlist.getFolder())):
-      os.makedirs(path(playlist.getFolder()))
+      try:
+        os.makedirs(path(playlist.getFolder()))
+      except OSError:
+        Disp.MessageBox("Invalid Playlist Title: "+playlist.getFolder(), "ERROR!")
+        return 1;
     #Check for already existing songs, remove them from list
     toRemove = []
     for song in range(len(playlist.songList)):
