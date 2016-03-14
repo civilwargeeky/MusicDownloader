@@ -1,12 +1,13 @@
 ;My Installer for the GenerateHeader.py setup
+#define _VERSION "1.2.3"
 
 [Setup]
 AppName="Music Downloader"
-AppVersion=1.2.2
+AppVersion={#_VERSION}
 DefaultDirName={userdesktop}\MusicDownloader
 DisableProgramGroupPage=yes
 Compression=lzma2
-OutputBaseFilename=MusicDownloader_v1.2.2
+OutputBaseFilename=MusicDownloader_v{#_VERSION}
 SolidCompression=yes
 Uninstallable=no
 OutputDir="release"

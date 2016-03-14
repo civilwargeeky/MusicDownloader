@@ -13,12 +13,15 @@ class MainBox(tk.Tk):
     super().__init__(*args, **kwargs)
     self.title(title)
     
+  def size(self, x, y):
+    self.minsize(width = x, height = y)
+    return self
+    
 class VarLabel(ttk.Label):
   def __init__(self, displayValue, *args, **kwargs):
     self.data = tk.StringVar(root, displayValue)
     self.type = displayValue.__class__ #Store the type of the variable. Var is reconstructed on return
     super().__init__(textvariable = self.data, *args, **kwargs)
-    self.pack()
     
   def get(self):
     return self.type(self.data.get()) #Returns the variable as its original type (makes a new object)
@@ -32,7 +35,6 @@ class VarEntry(ttk.Entry):
     self.data = tk.StringVar(root, "")
     self.type = type #Store the type of the variable. Var is reconstructed on return
     super().__init__(textvariable = self.data, *args, **kwargs)
-    self.pack()
     
   def get(self):
     return self.type(self.data.get()) #Returns the variable as its original type (makes a new object)
@@ -49,7 +51,6 @@ class VarList(tk.Listbox):
     for val in self.data: #Add all data
       self.insert(tk.END, val)
     self.bind("<ButtonRelease-1>", self.onClick, add="+") #Add a function to auto-set things
-    self.pack()
     
   def get(self):
     try:
@@ -62,16 +63,22 @@ class VarList(tk.Listbox):
     except: #Its like _tkinter.TclError but nah imports
       return self.toRet
       
-  def onClick(self, event):
+  def onClick(self, event): #This sets personal values when the thing is clicked.
     self.get()
+    
+class VarButton(tk.Button):
+  def __init__(self, text, command = None, *args, **kwargs):
+    super().__init__(text = text, command = command, *args, **kwargs)
+    
+  def set(self, func):
+    self.config(commmand = func)
       
 class MessageBox():
   minSize = (200, 200) #Arbitrary size
   def __init__(self, text, title = "Message!", size = None):
     if type(size) == list:
-      minSize = size[:]
-    root = MainBox(title)
-    root.minsize(width = self.minSize[0], height = self.minSize[1])
+      self.minSize = size[:]
+    root = MainBox(title).size(*self.minSize)
     VarLabel(text)
     tk.Button(text = "OK", command = lambda _=None: root.destroy()).pack()
     root.mainloop()

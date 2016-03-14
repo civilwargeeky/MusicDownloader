@@ -1,15 +1,33 @@
 from os import system
-#Update this before doign anything else
+#Update this before doing anything else
 system("start /WAIT resources/youtube-dl.exe -U")
 
 from distutils.core import setup
-import py2exe, shutil, os
+import py2exe, shutil, os, re
 
 outputFolder = "dist"
 
+with open("version.txt") as file:
+  VERSION = file.read()
+  
+#Change various files so they have the proper version
+def updateFileVersionInfo(fileName):
+  print("[PRE] Updating version info for ", fileName," to ",VERSION)
+  with open(fileName) as file:
+    openFile = file.read()
+    
+  openFile = re.sub("\d+\.\d+\.\d+", VERSION, openFile, count = 1)
+    
+  with open(fileName,"w") as file:
+    file.write(openFile)
+
+updateFileVersionInfo("MusicUpdater.py")
+updateFileVersionInfo("MusicUpdater.iss")
+
+
 setup(
   name="Music Updater",
-  version="1.0.0",
+  version=VERSION,
   description="Downloads music from youtube using youtube-dl",
   author="DJ Dan",
   console=["MusicUpdater.py"],
@@ -47,3 +65,6 @@ for i in files:
   
 for i in scripts:
   copyFile(i, "Scripts")
+  
+print("[BUILD] Running Inno Setup File")
+system('"C:\Program Files (x86)\Inno Setup 5\Compil32.exe" /cc MusicUpdater.iss')

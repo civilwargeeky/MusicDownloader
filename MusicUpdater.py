@@ -1,5 +1,5 @@
 #MusicUpdater.py
-#Version 1.0.0
+#Version 1.2.3
 #This program takes in playlists (or list of songs), downloads and processes them.
 """
 Possible expansion ideas:
@@ -353,16 +353,18 @@ def main():
         
     root = Disp.MainBox("Music Updater")
     root.minsize(width = 400, height = 200)
-    Disp.VarLabel("Choose a file from the list!")
+    Disp.VarLabel("Choose a file from the list!").pack()
     choiceBox = Disp.VarList(v_options, width = 75)
+    choiceBox.pack()
     def openFile(*args):
       if choiceBox.get():
         debug('"'+adjustInputFile(choiceBox.get())+'"')
         os.system('"'+adjustInputFile(choiceBox.get())+'"') #Just call it and they can open it with whatever
     
     tk.Button(text = "Open file for editing", command = openFile).pack()
-    Disp.VarLabel("Or you can put a file or playlist url here")
+    Disp.VarLabel("Or you can put a file or playlist url here").pack()
     choiceEntry = Disp.VarEntry(width = 75)
+    choiceEntry.pack()
     
     #Functions
     def quit(*args):
